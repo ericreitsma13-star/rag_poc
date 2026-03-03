@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# RAG runtime state
+.rag_index_state.json
+
+# Documents (user data, not committed)
+data/
+
+# Environment
+.env
+
+# Editor
+.idea/
+.vscode/
+*.swp
