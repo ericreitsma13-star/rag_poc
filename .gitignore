@@ -19,3 +19,9 @@ data/
 .idea/
 .vscode/
 *.swp
+
+# BM25 index (generated artifact)
+bm25_index.pkl
+node_modules/
+frontend/client/node_modules/
+frontend/server/node_modules/

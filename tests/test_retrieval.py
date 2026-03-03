@@ -22,10 +22,12 @@ def test_point_id_differs_by_path():
     assert point_id("/data/a.txt", 0) != point_id("/data/b.txt", 0)
 
 
-def test_point_id_is_hex_string():
+def test_point_id_is_uuid_string():
+    import uuid
+
     pid = point_id("/data/file.txt", 3)
     assert isinstance(pid, str)
-    int(pid, 16)  # should not raise
+    uuid.UUID(pid)  # should not raise — valid UUID format
 
 
 # ── format_context ────────────────────────────────────────────────────────────
@@ -117,6 +119,9 @@ def test_run_query_returns_no_context_message():
         patch.dict(sys.modules, {"app.utils.embeddings": fake_embeddings_mod}),
         patch("app.rag_query.QdrantStore", return_value=mock_store),
     ):
-        answer = run_query("Wat is dit?")
+        result = run_query("Wat is dit?")
 
+    # run_query now returns {"answer": "...", "citations": [...]}
+    assert isinstance(result, dict)
+    answer = result["answer"]
     assert "weet" in answer.lower() or "niet" in answer.lower()

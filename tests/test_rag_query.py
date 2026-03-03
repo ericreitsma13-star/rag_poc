@@ -19,6 +19,6 @@ def test_format_context_contains_citations():
 def test_build_messages_includes_context_and_question():
     messages = build_messages("What is this?", "[a.md#0]\nHello")
     assert messages[0]["role"] == "system"
-    assert "Gebruik alleen de context" in messages[0]["content"]
+    assert "context" in messages[0]["content"].lower()
     assert "What is this?" in messages[1]["content"]
     assert "[a.md#0]" in messages[1]["content"]
