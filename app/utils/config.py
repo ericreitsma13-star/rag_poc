@@ -51,7 +51,7 @@ def load_settings() -> Settings:
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "docs"),
         rag_embed_model=os.getenv("RAG_EMBED_MODEL", "intfloat/multilingual-e5-base"),
         ollama_url=os.getenv("OLLAMA_URL", "http://localhost:1234"),
-        ollama_model=os.getenv("OLLAMA_MODEL", "gemma-3-12b-it"),
+        ollama_model=os.getenv("OLLAMA_MODEL", "qwen3-30b-a3b-instruct-2507:2"),
         rag_top_k=int(os.getenv("RAG_TOP_K", "6")),
         rag_chunk_chars=int(os.getenv("RAG_CHUNK_CHARS", "1800")),
         rag_chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "250")),
