@@ -35,16 +35,17 @@ def build_messages(question: str, context: str) -> list[dict[str, str]]:
 
 
 
-def ask_ollama(ollama_url: str, model: str, messages: list[dict[str, str]]) -> str:
-    endpoint = f"{ollama_url.rstrip('/')}/api/chat"
+def ask_llm(llm_url: str, model: str, messages: list[dict[str, str]]) -> str:
+    """Call any OpenAI-compatible /v1/chat/completions endpoint (LM Studio, Ollama, etc.)."""
+    endpoint = f"{llm_url.rstrip('/')}/v1/chat/completions"
     response = requests.post(
         endpoint,
         json={"model": model, "messages": messages, "stream": False},
-        timeout=180,
+        timeout=600,
     )
     response.raise_for_status()
     payload = response.json()
-    return payload.get("message", {}).get("content", "")
+    return payload["choices"][0]["message"]["content"]
 
 
 
@@ -66,7 +67,7 @@ def run_query(question: str, top_k: int | None = None) -> str:
         return "Ik weet het niet op basis van de huidige index. Voeg relevante documenten toe en indexeer opnieuw."
 
     messages = build_messages(question, context)
-    answer = ask_ollama(settings.ollama_url, settings.ollama_model, messages)
+    answer = ask_llm(settings.ollama_url, settings.ollama_model, messages)
     return answer.strip()
 
 

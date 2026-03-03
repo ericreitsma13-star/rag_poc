@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hashlib import sha1
+import uuid
 
 
 class QdrantStore:
@@ -63,5 +63,5 @@ class QdrantStore:
 
 
 def point_id(source_path: str, chunk_index: int) -> str:
-    raw = f"{source_path}:{chunk_index}".encode("utf-8")
-    return sha1(raw).hexdigest()
+    name = f"{source_path}:{chunk_index}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
