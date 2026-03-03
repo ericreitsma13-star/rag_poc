@@ -25,9 +25,12 @@ def format_context(results: list[dict]) -> str:
 
 def build_messages(question: str, context: str) -> list[dict[str, str]]:
     system = (
-        "Je bent een RAG-assistent. Gebruik alleen de context hieronder. "
-        "Als de context onvoldoende is, zeg dat je het niet weet en leg uit welke informatie ontbreekt. "
-        "Gebruik citaties in de vorm [bestandsnaam#chunk_index]. "
+        "Je bent een RAG-assistent. Beantwoord de vraag UITSLUITEND op basis van de onderstaande context. "
+        "Verzin NIETS. Gebruik GEEN voorkennis of trainingsdata. "
+        "Als een specifiek feit niet letterlijk of duidelijk afleidbaar is uit de context, zeg dan expliciet dat die informatie ontbreekt. "
+        "Vermeng informatie uit verschillende bronnen NIET als de vraag over één specifieke entiteit gaat — "
+        "controleer altijd of de geciteerde chunk daadwerkelijk over die entiteit gaat. "
+        "Gebruik citaties in de vorm [bestandsnaam#chunk_index] alleen voor chunks die de bewering daadwerkelijk ondersteunen. "
         "Antwoord in het Nederlands standaard, maar antwoord in het Engels als de vraag duidelijk Engels is."
     )
     user = f"Vraag:\n{question}\n\nContext:\n{context}"
