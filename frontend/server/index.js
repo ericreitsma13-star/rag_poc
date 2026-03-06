@@ -9,10 +9,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, "../.env") });
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Config from env
 const RAG_DATA_DIR = process.env.RAG_DATA_DIR || path.join(process.env.HOME, "local-rag", "data");
 const PYTHON_BIN   = process.env.PYTHON_BIN   || path.join(__dirname, "../../.venv/bin/python");
 const RAG_ROOT     = process.env.RAG_ROOT     || path.join(__dirname, "../..");
@@ -30,7 +30,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [".pdf", ".docx", ".txt", ".md", ".xlsx"];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -38,52 +38,96 @@ const upload = multer({
   },
 });
 
-// ── Helper: run Python module and stream output ────────────────────────────
-function runPython(args, res, onDone) {
-  const proc = spawn(PYTHON_BIN, args, { cwd: RAG_ROOT });
-  let stdout = "";
-  let stderr = "";
-
-  proc.stdout.on("data", (d) => { stdout += d.toString(); });
-  proc.stderr.on("data", (d) => { stderr += d.toString(); });
-
-  proc.on("close", (code) => {
-    if (code !== 0) {
-      return res.status(500).json({ error: stderr || "Python process failed", code });
-    }
-    onDone(stdout, stderr);
-  });
-
-  proc.on("error", (err) => {
-    res.status(500).json({ error: `Failed to spawn Python: ${err.message}` });
-  });
-}
-
-// ── POST /api/query ────────────────────────────────────────────────────────
-// Body: { question, filetype?, file?, since?, tag? }
-app.post("/api/query", (req, res) => {
+// ── POST /api/query/stream ─────────────────────────────────────────────────
+// Streams tokens as SSE. Each event: data: {"type":"token","content":"..."}
+// Final event:           data: {"type":"citations","data":[...]}
+app.post("/api/query/stream", (req, res) => {
   const { question, filetype, file, since, tag } = req.body;
 
   if (!question?.trim()) {
     return res.status(400).json({ error: "question is required" });
   }
 
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering if behind proxy
+  res.flushHeaders();
+
+  const args = ["-m", "app.rag_query", question, "--stream"];
+  if (filetype) args.push("--filetype", filetype);
+  if (file)     args.push("--file",     file);
+  if (since)    args.push("--since",    since);
+  if (tag)      args.push("--tag",      tag);
+
+  const proc = spawn(PYTHON_BIN, args, { cwd: RAG_ROOT });
+  let buf = "";
+
+  proc.stdout.on("data", (chunk) => {
+    buf += chunk.toString();
+    // Process complete newline-delimited JSON lines
+    const lines = buf.split("\n");
+    buf = lines.pop(); // keep incomplete last line in buffer
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        JSON.parse(line); // validate JSON
+        res.write(`data: ${line}\n\n`);
+      } catch {
+        // Not valid JSON — skip (could be logging output)
+      }
+    }
+  });
+
+  proc.stderr.on("data", (d) => {
+    // Python logging goes to stderr — don't forward to client, just log here
+    process.stderr.write(d);
+  });
+
+  proc.on("close", (code) => {
+    // Flush remaining buffer
+    if (buf.trim()) {
+      try {
+        JSON.parse(buf);
+        res.write(`data: ${buf}\n\n`);
+      } catch { /* skip */ }
+    }
+    res.write(`data: ${JSON.stringify({ type: "done", code })}\n\n`);
+    res.end();
+  });
+
+  proc.on("error", (err) => {
+    res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
+    res.end();
+  });
+
+  // Clean up if client disconnects
+  req.on("close", () => proc.kill());
+});
+
+// ── POST /api/query (non-streaming fallback) ───────────────────────────────
+app.post("/api/query", (req, res) => {
+  const { question, filetype, file, since, tag } = req.body;
+  if (!question?.trim()) return res.status(400).json({ error: "question is required" });
+
   const args = ["-m", "app.rag_query", question];
   if (filetype) args.push("--filetype", filetype);
-  if (file)     args.push("--file", file);
-  if (since)    args.push("--since", since);
-  if (tag)      args.push("--tag", tag);
+  if (file)     args.push("--file",     file);
+  if (since)    args.push("--since",    since);
+  if (tag)      args.push("--tag",      tag);
 
-  runPython(args, res, (stdout) => {
-    // rag_query.py prints JSON: { answer, citations: [{label, file, chunk}] }
-    // Fall back to raw text if not JSON
+  const proc = spawn(PYTHON_BIN, args, { cwd: RAG_ROOT });
+  let stdout = "", stderr = "";
+  proc.stdout.on("data", (d) => { stdout += d.toString(); });
+  proc.stderr.on("data", (d) => { stderr += d.toString(); });
+  proc.on("close", (code) => {
+    if (code !== 0) return res.status(500).json({ error: stderr || "Python process failed", code });
     try {
-      const parsed = JSON.parse(stdout.trim());
-      res.json(parsed);
+      res.json(JSON.parse(stdout.trim()));
     } catch {
       res.json({ answer: stdout.trim(), citations: [] });
     }
   });
+  proc.on("error", (err) => res.status(500).json({ error: err.message }));
 });
 
 // ── POST /api/upload ───────────────────────────────────────────────────────
@@ -93,26 +137,25 @@ app.post("/api/upload", upload.array("files"), (req, res) => {
 });
 
 // ── POST /api/index ────────────────────────────────────────────────────────
-// Body: { tag? }  — triggers rag_index.py
 app.post("/api/index", (req, res) => {
   const { tag } = req.body || {};
   const args = ["-m", "app.rag_index"];
   if (tag) args.push("--tag", tag);
 
-  // Stream progress as newline-delimited JSON events
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.flushHeaders();
 
   const proc = spawn(PYTHON_BIN, args, { cwd: RAG_ROOT });
-
   proc.stdout.on("data", (d) => {
-    const lines = d.toString().split("\n").filter(Boolean);
-    lines.forEach((line) => res.write(`data: ${JSON.stringify({ log: line })}\n\n`));
+    d.toString().split("\n").filter(Boolean).forEach((line) =>
+      res.write(`data: ${JSON.stringify({ log: line })}\n\n`)
+    );
   });
   proc.stderr.on("data", (d) => {
-    const lines = d.toString().split("\n").filter(Boolean);
-    lines.forEach((line) => res.write(`data: ${JSON.stringify({ log: line, level: "warn" })}\n\n`));
+    d.toString().split("\n").filter(Boolean).forEach((line) =>
+      res.write(`data: ${JSON.stringify({ log: line, level: "warn" })}\n\n`)
+    );
   });
   proc.on("close", (code) => {
     res.write(`data: ${JSON.stringify({ done: true, code })}\n\n`);
